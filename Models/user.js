@@ -15,14 +15,14 @@ static async create({firstname, lastname, email, birthdate, phone, birthday, loc
       [firstname, lastname]);
 
   if (duplicateCheck.rows[0])
-    throw new BadRequestError(`User ${handle}, already exists`);
+    throw new BadRequestError(`User ${firstname, lastname}, already exists`);
 
   
   const result = await db.query(
         `INSERT INTO Users
          (firstname, lastname, email, birthdate, phone, birthday, location, avatar, location, wallpaper, createdAt)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         RETURNING "firstname, lastname, email, birthdate, phone, birthday, location,avatar, location, wallpaper, createdAt"`,
+         RETURNING firstname, lastname, email, birthdate, phone, birthday, location,avatar, location, wallpaper, createdAt`,
       [
         firstname, 
         lastname,
@@ -34,12 +34,14 @@ static async create({firstname, lastname, email, birthdate, phone, birthday, loc
         avatar, 
         location, 
         wallpaper, 
-        createdA
+        createdAt
       ],
   );
   const User = result.rows[0];
 
   return User;
 }
+
+
 
 }
