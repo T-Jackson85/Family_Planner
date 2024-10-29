@@ -1,0 +1,20 @@
+{
+  "name": "family_planner",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node app.js",
+    "seed": "node prisma/seed.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@prisma/client": "^5.21.1",
+    "express": "^4.21.0",
+    "prisma": "^5.21.1",
+    "prisma-client": "^0.0.0"
+  }
+}
