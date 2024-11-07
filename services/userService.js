@@ -29,5 +29,5 @@ const updateUser = async (id, name, phone) => {
 };
 
 module.exports = {
-  updateUser, deleteUser, createUser, 
+  updateUser, deleteUser, createUser, findUser
 };
