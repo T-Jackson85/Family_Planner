@@ -9,7 +9,7 @@ const deleteUser = async(req, res) => {
 };
 
 const createUser = async(req, res) => {
-    const { email, password, firstName, lastName } = req.body;
+    const { firstName, lastName, email, password } = req.body;
     const createUser = createUser(firstName, lastName, email, password);
     res.json(createUser);
 };
