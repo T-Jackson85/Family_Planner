@@ -1,3 +1,4 @@
+
 const prisma = require("../prismaClient.js");
 const prisma = new PrismaClient();
 
