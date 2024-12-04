@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String
+  firstName String
+  lastName  String
+  phone     String?
+  birthday  DateTime?
+  location  String?
+  avatar    String? // Profile picture
+  wallpaper String? // Profile page wallpaper
+  createdAt DateTime  @default(now())
+
+  groups        Group[]   @relation("UserGroups")
+  comments      Comment[]
+  events        Event[]   @relation("UserEvents")
+  tasksCreated  Task[]    @relation("CreatedTasks")
+  tasksAssigned Task[]    @relation("AssignedTasks")
+  expenses      Expense[]
+  Admin         Admin[]
+}
+
+model Group {
+  id        Int      @id @default(autoincrement())
+  name      String
+  createdAt DateTime @default(now())
+
+  admins Admin[]
+  users  User[]  @relation("UserGroups")
+  events Event[]
+}
+
+model Admin {
+  id      Int   @id @default(autoincrement())
+  userId  Int
+  groupId Int
+  user    User  @relation(fields: [userId], references: [id])
+  group   Group @relation(fields: [groupId], references: [id])
+}
+
+model Event {
+  id       Int      @id @default(autoincrement())
+  title    String
+  date     DateTime
+  location String?
+  hostId   Int
+  groupId  Int
+
+  host     User      @relation("UserEvents", fields: [hostId], references: [id])
+  group    Group     @relation(fields: [groupId], references: [id])
+  comments Comment[]
+  tasks    Task[]
+  expenses Expense[]
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  content   String
+  createdAt DateTime @default(now())
+  userId    Int
+  eventId   Int
+
+  user  User  @relation(fields: [userId], references: [id])
+  event Event @relation(fields: [eventId], references: [id])
+}
+
+model Task {
+  id           Int    @id @default(autoincrement())
+  title        String
+  status       Status
+  createdById  Int
+  assignedToId Int?
+  eventId      Int
+
+  createdBy  User  @relation("CreatedTasks", fields: [createdById], references: [id])
+  assignedTo User? @relation("AssignedTasks", fields: [assignedToId], references: [id])
+  event      Event @relation(fields: [eventId], references: [id])
+}
+
+enum Status {
+  TODO
+  INPROGRESS
+  DONE
+}
+
+model Expense {
+  id          Int     @id @default(autoincrement())
+  amount      Float
+  description String?
+  paid        Boolean @default(false)
+  eventId     Int
+  paidById    Int
+
+  event  Event @relation(fields: [eventId], references: [id])
+  paidBy User  @relation(fields: [paidById], references: [id])
+}
