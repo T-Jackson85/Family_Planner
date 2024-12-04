@@ -1,0 +1,41 @@
+const express = require('express');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
+const router = express.Router();
+
+// Helper for error handling
+const asyncHandler = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch(next);
+
+
+// TASK ROUTES
+router.get('/tasks', asyncHandler(async (req, res) => {
+    const tasks = await prisma.task.findMany();
+    res.json(tasks);
+  }));
+  
+  router.get('/tasks/:id', asyncHandler(async (req, res) => {
+    const task = await prisma.task.findUnique({ where: { id: parseInt(req.params.id) } });
+    res.json(task);
+  }));
+  
+  router.post('/tasks', asyncHandler(async (req, res) => {
+    const task = await prisma.task.create({ data: req.body });
+    res.status(201).json(task);
+  }));
+  
+  router.put('/tasks/:id', asyncHandler(async (req, res) => {
+    const task = await prisma.task.update({
+      where: { id: parseInt(req.params.id) },
+      data: req.body,
+    });
+    res.json(task);
+  }));
+  
+  router.delete('/tasks/:id', asyncHandler(async (req, res) => {
+    await prisma.task.delete({ where: { id: parseInt(req.params.id) } });
+    res.status(204).send();
+  }));
+
+  module.exports = router;
