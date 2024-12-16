@@ -7,6 +7,8 @@ const eventRoutes = require('./routes/eventRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
 const taskRoutes = require('./routes/taskRoutes');
 const groupRoutes = require('./routes/groupRoutes');
+const authUser = require("./auth/login");
+const register = require("./auth/register");
 
 const app = express();
 
@@ -23,7 +25,8 @@ app.use('/api', eventRoutes);
 app.use('/api', expenseRoutes);
 app.use('/api', taskRoutes);
 app.use('/api', groupRoutes);
-
+app.use('./api', authUser);
+app.use('./api', register);
 
   app.use(express.static(path.join(__dirname,  'build')));
 
