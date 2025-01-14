@@ -1,16 +1,37 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+
+
+
+// Importing Routes
 const userRoutes = require('./routes/userRoutes');
-const eventRoutes = require('./routes/eventRoutes'); 
+const eventRoutes = require('./routes/eventRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
 const taskRoutes = require('./routes/taskRoutes');
 const groupRoutes = require('./routes/groupRoutes');
-const authUser = require("./auth/login");
-const register = require("./auth/register");
+const authUser = require("./api/auth/login");
+const register = require("./api/auth/register");
+const authRoutes = require('./api/auth/me');
+const messageRoutes = require("./routes/messages");
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "http://localhost:3000", // React development server
+    methods: ["GET", "POST", "PUT", "DELETE"],
+  },
+});
+
+// Attach Socket.IO to request object
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
 
 // Middleware
 app.use(cors({
@@ -25,20 +46,55 @@ app.use('/api', eventRoutes);
 app.use('/api', expenseRoutes);
 app.use('/api', taskRoutes);
 app.use('/api', groupRoutes);
-app.use('./api', authUser);
-app.use('./api', register);
+app.use('/api', authUser);
+app.use('/api', register);
+app.use('/api/auth', authRoutes);
+app.use('/api', messageRoutes);
 
-  app.use(express.static(path.join(__dirname,  'build')));
+// Static Files for React Frontend
+app.use(express.static(path.join(__dirname, 'build')));
 
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'build', 'index.html'));
+// Catch-All Route for React Frontend
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'build', 'index.html'));
+});
+
+// Socket.IO Events
+io.on('connection', (socket) => {
+  // Retrieve userId from the connection query
+  const userId = socket.handshake.query.userId;
+
+  if (userId) {
+    // Join a room specific to the user
+    socket.join(`user-${userId}`);
+    console.log(`User ${userId} connected and joined room user-${userId}`);
+  }
+
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    console.log(`User ${userId} disconnected.`);
   });
 
+  // Handle direct messages
+  socket.on('sendMessage', (data) => {
+    const { receiverId, content } = data;
+
+    if (receiverId && content) {
+      // Emit message to the specific room for the receiver
+      io.to(`user-${receiverId}`).emit('receiveMessage', {
+        senderId: userId,
+        content,
+        createdAt: new Date(),
+      });
+      console.log(`Message sent from user ${userId} to user ${receiverId}`);
+    }
+  });
+});
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
 
 module.exports = app;

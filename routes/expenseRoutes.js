@@ -11,9 +11,12 @@ const asyncHandler = (fn) => (req, res, next) =>
 
 // EXPENSE ROUTES
 router.get('/expenses', asyncHandler(async (req, res) => {
-    const expenses = await prisma.expense.findMany();
-    res.json(expenses);
-  }));
+  const { eventId } = req.query;
+  if (!eventId) return res.status(400).json({ error: "Event ID is required" });
+
+  const expenses = await prisma.expense.findMany({ where: { eventId: parseInt(eventId) } });
+  res.json(expenses);
+}));
   
   router.get('/expenses/:id', asyncHandler(async (req, res) => {
     const expense = await prisma.expense.findUnique({ where: { id: parseInt(req.params.id) } });

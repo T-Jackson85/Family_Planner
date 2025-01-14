@@ -2,6 +2,9 @@
 const prisma = require("../prismaClient.js");
 const prisma = new PrismaClient();
 
+
+
+
 const deleteUser = async(id) => await prisma.user.delete({
     where: { id: parseInt(id) },
 });
@@ -18,7 +21,6 @@ const findUser = async(id) => {
         include: { tasks: true, groups: true, notifications: true },
     });
 }
-
 
 
 

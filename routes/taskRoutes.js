@@ -11,9 +11,13 @@ const asyncHandler = (fn) => (req, res, next) =>
 
 // TASK ROUTES
 router.get('/tasks', asyncHandler(async (req, res) => {
-    const tasks = await prisma.task.findMany();
-    res.json(tasks);
-  }));
+  const { eventId } = req.query;
+  if (!eventId) return res.status(400).json({ error: "Event ID is required" });
+
+  const tasks = await prisma.task.findMany({ where: { eventId: parseInt(eventId) } });
+  res.json(tasks);
+}));
+
   
   router.get('/tasks/:id', asyncHandler(async (req, res) => {
     const task = await prisma.task.findUnique({ where: { id: parseInt(req.params.id) } });

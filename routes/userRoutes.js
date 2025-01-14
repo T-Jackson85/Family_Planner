@@ -1,8 +1,10 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 
+
 const prisma = new PrismaClient();
 const router = express.Router();
+
 
 // Helper for error handling
 const asyncHandler = (fn) => (req, res, next) =>
@@ -16,9 +18,10 @@ router.get('/users', asyncHandler(async (req, res) => {
 
 router.get('/users/:id', asyncHandler(async (req, res) => {
   console.log(req.params.id);
-  const user = await prisma.user.findUnique({ where: { id: parseInt(req.params.id) } });
+  const user = await prisma.user.findUnique({ where: { id: parseInt(req.params.id)} });
   res.json(user);
 }));
+
 
 router.post('/users', asyncHandler(async (req, res) => {
   const user = await prisma.user.create({ data: req.body });

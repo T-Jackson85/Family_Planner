@@ -12,7 +12,7 @@ const createEvent = async(title, date, location, hostId, groupId) => await prism
   
 const findEvent = async(id) =>  await prisma.event.findUnique({
     where: { id: parseInt(id) },
-    include: { comments: true, host: true, group: true },
+    include: { description: true, date: true, comments: true, host: true, group: true },
 });
 
 const updateEvent = async(title, description, date, location) => await prisma.event.update({

@@ -1,4 +1,4 @@
-const { updateUser, deleteUser, createUser, findUser  } = require("../services/userService");
+const { updateUser, deleteUser, createUser, findUser} = require("../services/userService");
 
 
 const deleteUser = async(req, res) => {
@@ -19,7 +19,6 @@ const findUser = async(req, res) => {
     const findUser = findUser(id);
     res.json(findUser); 
 };
-
 
 
 const updateUser = async (req, res) => {
