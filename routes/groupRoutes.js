@@ -1,7 +1,6 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const authenticateToken = require('../api/middleware/authenticateToken');
-const sendEmail = require('../api/auth/sendEmail'); // Utility for sending emails
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 const prisma = new PrismaClient();
@@ -62,42 +61,51 @@ router.post(
   '/groups',
   authenticateToken,
   asyncHandler(async (req, res) => {
-    const { name, invites } = req.body;
+    const { name, invites } = req.body; // Group name and invited user emails
     const userId = req.user.id;
 
     if (!name) {
       return res.status(400).json({ error: 'Group name is required.' });
     }
 
+    // Step 1: Create a new group
     const group = await prisma.group.create({
       data: {
         name,
-        admins: { create: { userId } },
+        admins: { create: { userId } }, // Add the current user as an admin
       },
     });
 
-    // Send invitations
+    // Step 2: Process and handle invitations
     if (invites && invites.length > 0) {
       for (const email of invites) {
         const invitedUser = await prisma.user.findUnique({ where: { email } });
+
         if (invitedUser) {
-          await prisma.groupRequest.create({
+          // Create a pending group request for the invited user
+          const groupRequest = await prisma.groupRequest.create({
             data: { userId: invitedUser.id, groupId: group.id },
           });
 
-          // Send email notification
-          await sendEmail(
-            email,
-            `You have been invited to join the group "${name}"`,
-            `Hello, you have been invited to join the group "${name}". Please log in to your account to accept the invitation.`
-          );
+          // Emit real-time notification to the invited user via Socket.IO
+          req.io.to(`user-${invitedUser.id}`).emit('groupInvite', {
+            groupName: name,
+            groupId: group.id,
+            requestId: groupRequest.id,
+            message: `You have been invited to join the group "${name}".`,
+          });
+        } else {
+          console.warn(`No user found with email: ${email}`); // Log a warning for invalid emails
         }
       }
     }
 
+    // Step 3: Respond with the created group details
     res.status(201).json(group);
   })
 );
+
+
 
 /**
  * Get all pending requests for groups where the logged-in user is an admin
@@ -260,6 +268,7 @@ router.post(
       return res.status(400).json({ error: 'No invites provided.' });
     }
 
+    // Check if the group exists
     const group = await prisma.group.findUnique({ where: { id: groupId } });
     if (!group) {
       return res.status(404).json({ error: 'Group not found.' });
@@ -269,29 +278,26 @@ router.post(
     for (const email of invites) {
       const user = await prisma.user.findUnique({ where: { email } });
       if (user) {
+        // Create a pending group request for the invited user
         const invite = await prisma.groupRequest.create({
           data: { userId: user.id, groupId, status: 'PENDING' },
         });
         createdInvites.push(invite);
 
-        // Send email notification
-        await sendEmail(
-          email,
-          `Invitation to Join Group "${group.name}"`,
-          `Hello, you have been invited to join the group "${group.name}". Please log in to accept the invitation.`
-        );
-
-        // Emit real-time notification
+        // Emit real-time notification to the invited user via Socket.IO
         req.io.to(`user-${user.id}`).emit('group-invite', {
           message: `You have been invited to join the group "${group.name}".`,
           groupId: group.id,
+          requestId: invite.id,
         });
+      } else {
+        console.warn(`No user found with email: ${email}`); // Log a warning for invalid emails
       }
     }
 
+    // Respond with the created invites
     res.json({ message: 'Invites sent successfully.', invites: createdInvites });
   })
 );
-
 
 module.exports = router;

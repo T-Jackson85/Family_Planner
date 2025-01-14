@@ -5,8 +5,6 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 
-
-
 // Importing Routes
 const userRoutes = require('./routes/userRoutes');
 const eventRoutes = require('./routes/eventRoutes');
@@ -89,6 +87,16 @@ io.on('connection', (socket) => {
       console.log(`Message sent from user ${userId} to user ${receiverId}`);
     }
   });
+
+  // Handle group invitations
+  socket.on('sendGroupInvite', (data) => {
+    const { groupName, groupId, email } = data;
+    console.log(`Invite sent for group: ${groupName} to ${email}`);
+
+    // Optionally emit notifications to specific user rooms
+    // Example: Notify specific user room if their userId is known
+    // socket.to(`user-${userId}`).emit('group-invite', { message: `You have been invited to join ${groupName}`, groupId });
+  });
 });
 
 const PORT = process.env.PORT || 5000;
@@ -98,3 +106,4 @@ server.listen(PORT, () => {
 });
 
 module.exports = app;
+
