@@ -16,9 +16,23 @@ router.get('/users', asyncHandler(async (req, res) => {
   res.json(users);
 }));
 
+// Get user by ID
 router.get('/users/:id', asyncHandler(async (req, res) => {
-  console.log(req.params.id);
-  const user = await prisma.user.findUnique({ where: { id: parseInt(req.params.id)} });
+  const user = await prisma.user.findUnique({ where: { id: parseInt(req.params.id) } });
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  res.json(user);
+}));
+
+
+// Get user by email
+router.get('/users/email/:email', asyncHandler(async (req, res) => {
+  const { email } = req.params;
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
   res.json(user);
 }));
 

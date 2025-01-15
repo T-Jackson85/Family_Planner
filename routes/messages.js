@@ -86,4 +86,71 @@ router.get(
   })
 );
 
+router.put(
+    '/messages/:messageId/handle-invite',
+    authenticateToken,
+    asyncHandler(async (req, res) => {
+      const { messageId } = req.params;
+      const { status } = req.body;
+  
+      if (!['APPROVED', 'REJECTED'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid status.' });
+      }
+  
+      // Find the original message
+      const message = await prisma.message.findUnique({
+        where: { id: parseInt(messageId, 10) },
+        include: {
+          sender: true, // Include sender info to send a notification
+        },
+      });
+  
+      if (!message) {
+        return res.status(404).json({ error: 'Message not found.' });
+      }
+  
+      const groupNameMatch = message.content.match(/group: (.+)/i);
+      const groupName = groupNameMatch ? groupNameMatch[1] : null;
+  
+      if (!groupName) {
+        return res.status(400).json({ error: 'Group name not found in the message.' });
+      }
+  
+      const group = await prisma.group.findUnique({ where: { name: groupName } });
+  
+      if (!group) {
+        return res.status(404).json({ error: 'Group not found.' });
+      }
+  
+      if (status === 'APPROVED') {
+        // Add user to the group
+        await prisma.group.update({
+          where: { id: group.id },
+          data: { users: { connect: { id: message.receiverId } } },
+        });
+  
+        // Notify the sender
+        await prisma.message.create({
+          data: {
+            senderId: message.receiverId,
+            receiverId: message.senderId,
+            content: `${message.sender.firstName} has accepted your invitation to join "${group.name}".`,
+          },
+        });
+      } else {
+        // Notify the sender of rejection
+        await prisma.message.create({
+          data: {
+            senderId: message.receiverId,
+            receiverId: message.senderId,
+            content: `${message.sender.firstName} has rejected your invitation to join "${group.name}".`,
+          },
+        });
+      }
+  
+      res.json({ message: `Invite ${status.toLowerCase()} successfully.` });
+    })
+  );
+  
+
 module.exports = router;

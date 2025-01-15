@@ -1,6 +1,8 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const authenticateToken = require('../api/middleware/authenticateToken');
+
+
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 const prisma = new PrismaClient();
@@ -36,9 +38,14 @@ router.get(
     const group = await prisma.group.findUnique({
       where: { id: groupId },
       include: {
-        admins: true,
-        users: true,
+        admins: {
+          select: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
+        },
+        users: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
         requests: {
+          where: { status: 'APPROVED' },
           include: {
             user: { select: { firstName: true, lastName: true, email: true } },
           },
@@ -53,6 +60,7 @@ router.get(
     res.json(group);
   })
 );
+
 
 /**
  * Create a new group
@@ -157,55 +165,103 @@ router.get(
 /**
  * Join a group
  */
-router.post(
+router.put(
   '/groups/:id/join',
   authenticateToken,
   asyncHandler(async (req, res) => {
     const groupId = parseInt(req.params.id, 10);
     const userId = req.user.id;
+    const { status } = req.body;
 
-    if (isNaN(groupId)) {
-      return res.status(400).json({ error: 'Invalid group ID' });
+    if (!["APPROVED", "REJECTED"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status." });
     }
 
-    const groupExists = await prisma.group.findUnique({ where: { id: groupId } });
-    if (!groupExists) {
+    const group = await prisma.group.findUnique({ where: { id: groupId } });
+    if (!group) {
       return res.status(404).json({ error: 'Group not found' });
     }
 
-    const request = await prisma.groupRequest.create({
-      data: { userId, groupId },
+    const groupRequest = await prisma.groupRequest.findFirst({
+      where: {
+        groupId,
+        userId,
+        status: 'PENDING',
+      },
     });
 
-    res.status(201).json(request);
+    if (!groupRequest) {
+      return res.status(404).json({ error: 'No pending invite found for this group.' });
+    }
+
+    if (status === 'APPROVED') {
+      await prisma.groupRequest.update({
+        where: { id: groupRequest.id },
+        data: { status: 'APPROVED' },
+      });
+
+      await prisma.group.update({
+        where: { id: groupId },
+        data: {
+          users: { connect: { id: userId } },
+        },
+      });
+
+      return res.status(200).json({ message: 'Invite accepted and user added to the group.' });
+    } else {
+      await prisma.groupRequest.update({
+        where: { id: groupRequest.id },
+        data: { status: 'REJECTED' },
+      });
+
+      return res.status(200).json({ message: 'Invite rejected successfully.' });
+    }
   })
 );
+
 
 /**
  * Update group request status
  */
 router.put(
-  '/groups/:id/requests/:requestId',
+  "/groups/requests/:requestId/handle",
   authenticateToken,
   asyncHandler(async (req, res) => {
-    const requestId = parseInt(req.params.requestId, 10);
+    const { requestId } = req.params;
     const { status } = req.body;
 
+    if (!["APPROVED", "REJECTED"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status." });
+    }
+
     const request = await prisma.groupRequest.update({
-      where: { id: requestId },
+      where: { id: parseInt(requestId) },
       data: { status },
+      include: { group: true, user: true },
     });
 
-    if (status === 'APPROVED') {
+    if (status === "APPROVED") {
+      // Add user to the group
       await prisma.group.update({
         where: { id: request.groupId },
         data: { users: { connect: { id: request.userId } } },
       });
+    } else {
+      // Notify the sender that the request was rejected
+      await prisma.message.create({
+        data: {
+          senderId: request.userId,
+          receiverId: request.group.admins[0].userId, // Assuming the first admin is the sender
+          content: `Your invitation to ${request.user.firstName} ${request.user.lastName} was rejected.`,
+        },
+      });
     }
 
-    res.json(request);
+    res.json({ message: `Request ${status.toLowerCase()} successfully.` });
   })
 );
+
+
 
 /**
  * Fetch groups created by the logged-in user
@@ -299,5 +355,66 @@ router.post(
     res.json({ message: 'Invites sent successfully.', invites: createdInvites });
   })
 );
+router.get(
+  '/groups/search',
+  authenticateToken,
+  asyncHandler(async (req, res) => {
+    const { query } = req.query;
+
+    if (!query) {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+
+    const groups = await prisma.group.findMany({
+      where: {
+        name: {
+          contains: query, // Case-insensitive partial match
+          mode: 'insensitive',
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    res.json(groups);
+  })
+);
+router.get(
+  '/groups/:id/members',
+  authenticateToken,
+  asyncHandler(async (req, res) => {
+    const groupId = parseInt(req.params.id);
+
+    if (isNaN(groupId)) {
+      return res.status(400).json({ error: 'Invalid group ID' });
+    }
+
+    // Query group and its users
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: {
+        users: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    res.json(group.users); // Return only the members
+  })
+);
+
+
+
 
 module.exports = router;

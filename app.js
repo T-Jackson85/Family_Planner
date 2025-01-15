@@ -15,6 +15,7 @@ const authUser = require("./api/auth/login");
 const register = require("./api/auth/register");
 const authRoutes = require('./api/auth/me');
 const messageRoutes = require("./routes/messages");
+const updateRoutes = require('./api/auth/update');
 
 const app = express();
 const server = http.createServer(app);
@@ -48,6 +49,7 @@ app.use('/api', authUser);
 app.use('/api', register);
 app.use('/api/auth', authRoutes);
 app.use('/api', messageRoutes);
+app.use('/api', updateRoutes);
 
 // Static Files for React Frontend
 app.use(express.static(path.join(__dirname, 'build')));

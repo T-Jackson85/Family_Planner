@@ -6,37 +6,52 @@ const authenticateToken = require('../api/middleware/authenticateToken');
 const prisma = new PrismaClient();
 const router = express.Router();
 
+const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 
 router.get('/events', authenticateToken, async (req, res) => {
   try {
-    const { date } = req.query;
-    if (!date) return res.status(400).json({ error: 'Date parameter is required.' });
+    const { date, month } = req.query;
+
+    if (!date && !month) {
+      return res.status(400).json({ error: 'Date or month parameter is required.' });
+    }
 
     const userId = req.user.id;
 
-    const startOfDay = dayjs(date).startOf('day').toDate();
-    const endOfDay = dayjs(date).endOf('day').toDate();
-
-    const events = await prisma.event.findMany({
-      where: {
-        OR: [
-          { hostId: userId }, // Events created by the user
-          {
-            group: {
-              users: {
-                some: { id: userId }, // Events from groups the user is a member of
-              },
+    let whereClause = {
+      OR: [
+        { hostId: userId },
+        {
+          group: {
+            users: {
+              some: { id: userId },
             },
           },
-        ],
-        date: {
-          gte: startOfDay,
-          lte: endOfDay,
         },
-      },
+      ],
+    };
+
+    if (date) {
+      const startOfDay = dayjs(date).startOf('day').toDate();
+      const endOfDay = dayjs(date).endOf('day').toDate();
+      whereClause.date = {
+        gte: startOfDay,
+        lte: endOfDay,
+      };
+    } else if (month) {
+      const startOfMonth = dayjs().month(parseInt(month, 10) - 1).startOf('month').toDate();
+      const endOfMonth = dayjs().month(parseInt(month, 10) - 1).endOf('month').toDate();
+      whereClause.date = {
+        gte: startOfMonth,
+        lte: endOfMonth,
+      };
+    }
+
+    const events = await prisma.event.findMany({
+      where: whereClause,
       include: {
-        comments: { include: { user: true } }, // Include comments with user details
+        comments: { include: { user: true } },
       },
     });
 
@@ -46,6 +61,7 @@ router.get('/events', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 router.post('/events', authenticateToken, async (req, res) => {
   try {
@@ -138,6 +154,44 @@ router.put('/events/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+/**
+ * Delete an event
+ */
+router.delete(
+  '/events/:id',
+  authenticateToken,
+  asyncHandler(async (req, res) => {
+    const eventId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    if (isNaN(eventId)) {
+      return res.status(400).json({ error: 'Invalid event ID' });
+    }
+
+    // Check if the event exists and belongs to the user
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+
+    if (!event) {
+      return res.status(404).json({ error: 'Event not found.' });
+    }
+
+    if (event.hostId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized to delete this event.' });
+    }
+
+    // Delete related records manually
+    await prisma.comment.deleteMany({ where: { eventId } });
+    await prisma.task.deleteMany({ where: { eventId } });
+    await prisma.expense.deleteMany({ where: { eventId } });
+
+    // Delete the event
+    await prisma.event.delete({ where: { id: eventId } });
+
+    res.status(200).json({ message: 'Event deleted successfully.' });
+  })
+);
+
 
 router.get('/events/mine', authenticateToken, async (req, res) => {
   try {
