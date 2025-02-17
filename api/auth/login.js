@@ -41,8 +41,12 @@ router.post(
 
     const { email, password } = req.body;
 
-    // Find the user
-    const user = await prisma.user.findUnique({ where: { email } });
+    // Find the user and include their groups
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: { groups: { select: { id: true } } }, // Include group IDs
+    });
+
     if (!user) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
@@ -61,7 +65,19 @@ router.post(
     // Save refresh token in database
     await prisma.refreshToken.create({ data: { token: refreshToken, userId: user.id } });
 
-    res.json({ message: 'Login successful', accessToken, refreshToken });
+    // Send response with user and tokens
+    res.json({
+      message: 'Login successful',
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        groupIds: user.groups.map((group) => group.id), // Include group IDs
+      },
+    });
   })
 );
 
@@ -119,4 +135,3 @@ router.get(
 );
 
 module.exports = router;
-

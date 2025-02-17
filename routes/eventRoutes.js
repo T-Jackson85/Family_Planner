@@ -8,50 +8,57 @@ const router = express.Router();
 
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-
 router.get('/events', authenticateToken, async (req, res) => {
   try {
     const { date, month } = req.query;
-
-    if (!date && !month) {
-      return res.status(400).json({ error: 'Date or month parameter is required.' });
-    }
-
     const userId = req.user.id;
 
+    // Fetch the groups the user belongs to
+    const userGroups = await prisma.group.findMany({
+      where: { users: { some: { id: userId } } },
+      select: { id: true, users: { select: { id: true } } },
+    });
+
+    const groupIds = userGroups.map((group) => group.id);
+    const groupMemberIds = userGroups
+      .flatMap((group) => group.users)
+      .map((user) => user.id);
+
+    // Construct the query's where clause
     let whereClause = {
       OR: [
-        { hostId: userId },
-        {
-          group: {
-            users: {
-              some: { id: userId },
-            },
-          },
-        },
+        { hostId: userId }, // Events hosted by the user
+        { groupId: { in: groupIds } }, // Events in the user's groups
+        { hostId: { in: groupMemberIds } }, // Events hosted by group members
       ],
     };
 
+    // Add date filtering
     if (date) {
       const startOfDay = dayjs(date).startOf('day').toDate();
       const endOfDay = dayjs(date).endOf('day').toDate();
-      whereClause.date = {
-        gte: startOfDay,
-        lte: endOfDay,
-      };
+      whereClause.date = { gte: startOfDay, lte: endOfDay };
     } else if (month) {
       const startOfMonth = dayjs().month(parseInt(month, 10) - 1).startOf('month').toDate();
       const endOfMonth = dayjs().month(parseInt(month, 10) - 1).endOf('month').toDate();
-      whereClause.date = {
-        gte: startOfMonth,
-        lte: endOfMonth,
-      };
+      whereClause.date = { gte: startOfMonth, lte: endOfMonth };
     }
 
+    // Fetch events, tasks, and expenses
     const events = await prisma.event.findMany({
       where: whereClause,
       include: {
-        comments: { include: { user: true } },
+        group: { select: { name: true } }, // Include group name
+        host: { select: { firstName: true, lastName: true } }, // Include host's name
+        comments: {
+          select: {
+            content: true,
+            createdAt: true,
+            user: { select: { firstName: true } },
+          },
+        }, // Include comments
+        tasks: true, // Include tasks
+        expenses: true, // Include expenses
       },
     });
 
@@ -65,9 +72,21 @@ router.get('/events', authenticateToken, async (req, res) => {
 
 router.post('/events', authenticateToken, async (req, res) => {
   try {
-    const { title, date, location, description, groupId, tasks, expenses } = req.body;
+    const { title, date, location, description, tasks, expenses } = req.body;
     const userId = req.user.id;
 
+    // Fetch the user's group ID
+    const userGroup = await prisma.group.findFirst({
+      where: { users: { some: { id: userId } } }, // Relation with User model
+    });
+
+    if (!userGroup) {
+      return res.status(400).json({ error: "User is not part of any group." });
+    }
+
+    const groupId = userGroup.id;
+
+    // Create the event
     const event = await prisma.event.create({
       data: {
         title,
@@ -75,34 +94,36 @@ router.post('/events', authenticateToken, async (req, res) => {
         location,
         description,
         hostId: userId,
-        groupId: groupId || null,
+        groupId, // Associate the event with the user's group
         tasks: {
           create: tasks.map((task) => ({
             title: task.title,
-            status: task.status || "TODO", // Default to TODO
-            createdById: userId, // Set creator
+            status: task.status || "TODO",
+            createdById: userId, // Task creator is the host
           })),
         },
         expenses: {
           create: expenses.map((expense) => ({
             description: expense.description,
             amount: expense.amount,
-            paidById: userId, // Set payer
+            paidById: userId, // Expense payer is the host
           })),
         },
       },
       include: {
         tasks: true,
         expenses: true,
+        group: true, // Include group details in the response
       },
     });
 
     res.status(201).json(event);
   } catch (error) {
-    console.error('Error creating event:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error("Error creating event:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 router.put('/events/:id', authenticateToken, async (req, res) => {
   try {
@@ -261,4 +282,3 @@ router.post('/events/:id/comments', authenticateToken, async (req, res) => {
 
 
 module.exports = router;
-

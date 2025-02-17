@@ -76,43 +76,46 @@ router.post(
       return res.status(400).json({ error: 'Group name is required.' });
     }
 
-    // Step 1: Create a new group
+    // Check if the user already belongs to a group
+    const existingGroup = await prisma.group.findFirst({
+      where: { users: { some: { id: userId } } },
+    });
+
+    if (existingGroup) {
+      return res.status(400).json({ error: 'You already belong to a group.' });
+    }
+
+    // Create the new group
     const group = await prisma.group.create({
       data: {
         name,
-        admins: { create: { userId } }, // Add the current user as an admin
+        admins: { create: { userId } }, // Add the user as an admin
+        users: { connect: { id: userId } }, // Connect the user to the group
       },
     });
 
-    // Step 2: Process and handle invitations
+    // Handle invitations if provided
     if (invites && invites.length > 0) {
       for (const email of invites) {
         const invitedUser = await prisma.user.findUnique({ where: { email } });
-
         if (invitedUser) {
-          // Create a pending group request for the invited user
-          const groupRequest = await prisma.groupRequest.create({
+          await prisma.groupRequest.create({
             data: { userId: invitedUser.id, groupId: group.id },
           });
 
-          // Emit real-time notification to the invited user via Socket.IO
+          // Emit a notification via Socket.IO
           req.io.to(`user-${invitedUser.id}`).emit('groupInvite', {
             groupName: name,
             groupId: group.id,
-            requestId: groupRequest.id,
             message: `You have been invited to join the group "${name}".`,
           });
-        } else {
-          console.warn(`No user found with email: ${email}`); // Log a warning for invalid emails
         }
       }
     }
 
-    // Step 3: Respond with the created group details
-    res.status(201).json(group);
+    res.status(201).json({ groupId: group.id, name: group.name });
   })
 );
-
 
 
 /**
@@ -160,6 +163,65 @@ router.get(
   })
 );
 
+router.post(
+  '/groups/:groupId/requests',
+  authenticateToken,
+  asyncHandler(async (req, res) => {
+    const { groupId } = req.params;
+    const { userId } = req.body; // userId sent in the request
+
+    const parsedGroupId = parseInt(groupId, 10);
+
+    // Validate groupId
+    if (isNaN(parsedGroupId)) {
+      return res.status(400).json({ error: 'Invalid group ID.' });
+    }
+
+    // Check if the group exists
+    const group = await prisma.group.findUnique({ where: { id: parsedGroupId } });
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+
+    // Check for existing pending request
+    const existingRequest = await prisma.groupRequest.findFirst({
+      where: { userId, groupId: parsedGroupId, status: 'PENDING' },
+    });
+
+    if (existingRequest) {
+      return res.status(400).json({ error: 'You already have a pending request for this group.' });
+    }
+
+    // Create a new group request
+    const groupRequest = await prisma.groupRequest.create({
+      data: {
+        userId,
+        groupId: parsedGroupId,
+      },
+    });
+
+    // Notify group admins
+    const admins = await prisma.user.findMany({
+      where: {
+        groupAdmins: {
+          some: { id: parsedGroupId },
+        },
+      },
+    });
+
+    const io = req.app.get('io'); // Ensure you’ve set `io` in your Express app
+    admins.forEach((admin) => {
+      io.to(admin.id.toString()).emit('new-join-request', {
+        groupId: parsedGroupId,
+        userId,
+        groupName: group.name,
+      });
+    });
+
+    res.status(201).json(groupRequest);
+  })
+);
+
 
 
 /**
@@ -173,21 +235,30 @@ router.put(
     const userId = req.user.id;
     const { status } = req.body;
 
-    if (!["APPROVED", "REJECTED"].includes(status)) {
-      return res.status(400).json({ error: "Invalid status." });
+    if (!['APPROVED', 'REJECTED'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status.' });
     }
 
+    // Check if the user already belongs to a group
+    const existingGroup = await prisma.group.findFirst({
+      where: { users: { some: { id: userId } } },
+    });
+
+    if (existingGroup) {
+      return res.status(400).json({
+        error: 'You already belong to a group and cannot join another.',
+      });
+    }
+
+    // Validate the group
     const group = await prisma.group.findUnique({ where: { id: groupId } });
     if (!group) {
-      return res.status(404).json({ error: 'Group not found' });
+      return res.status(404).json({ error: 'Group not found.' });
     }
 
+    // Validate the pending invite
     const groupRequest = await prisma.groupRequest.findFirst({
-      where: {
-        groupId,
-        userId,
-        status: 'PENDING',
-      },
+      where: { userId, groupId, status: 'PENDING' },
     });
 
     if (!groupRequest) {
@@ -207,14 +278,14 @@ router.put(
         },
       });
 
-      return res.status(200).json({ message: 'Invite accepted and user added to the group.' });
+      res.status(200).json({ message: 'Invite accepted and user added to the group.' });
     } else {
       await prisma.groupRequest.update({
         where: { id: groupRequest.id },
         data: { status: 'REJECTED' },
       });
 
-      return res.status(200).json({ message: 'Invite rejected successfully.' });
+      res.status(200).json({ message: 'Invite rejected successfully.' });
     }
   })
 );
@@ -272,11 +343,20 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = req.user.id;
 
+    // Fetch all groups created by the logged-in user
     const groups = await prisma.group.findMany({
       where: {
-        admins: { some: { userId } },
+        admins: {
+          some: { userId },
+        },
       },
       include: {
+        admins: {
+          select: { user: { select: { firstName: true, lastName: true, email: true } } },
+        },
+        users: {
+          select: { firstName: true, lastName: true, email: true },
+        },
         requests: {
           include: {
             user: {
@@ -284,31 +364,29 @@ router.post(
             },
           },
         },
-        users: {
-          select: { firstName: true, lastName: true, email: true },
-        },
       },
     });
 
-    if (!groups || groups.length === 0) {
-      return res.status(404).json({ error: 'No groups found for the logged-in user.' });
-    }
-
-    const result = groups.map((group) => ({
-      groupId: group.id,
-      groupName: group.name,
-      members: group.users,
-      requests: group.requests.map((request) => ({
-        firstName: request.user.firstName,
-        lastName: request.user.lastName,
-        email: request.user.email,
-        status: request.status,
-      })),
-    }));
-
-    res.json(result);
+    res.json(
+      groups.map((group) => ({
+        groupId: group.id,
+        groupName: group.name,
+        members: group.users.map((user) => ({
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+        })),
+        requests: group.requests.map((request) => ({
+          firstName: request.user.firstName,
+          lastName: request.user.lastName,
+          email: request.user.email,
+          status: request.status,
+        })),
+      }))
+    );
   })
 );
+
 
 /**
  * Invite additional members to a group
@@ -324,7 +402,7 @@ router.post(
       return res.status(400).json({ error: 'No invites provided.' });
     }
 
-    // Check if the group exists
+    // Validate the group
     const group = await prisma.group.findUnique({ where: { id: groupId } });
     if (!group) {
       return res.status(404).json({ error: 'Group not found.' });
@@ -334,86 +412,312 @@ router.post(
     for (const email of invites) {
       const user = await prisma.user.findUnique({ where: { email } });
       if (user) {
-        // Create a pending group request for the invited user
+        // Check if the user already belongs to a group
+        const existingGroup = await prisma.group.findFirst({
+          where: { users: { some: { id: user.id } } },
+        });
+
+        if (existingGroup) {
+          continue; // Skip inviting users already in a group
+        }
+
         const invite = await prisma.groupRequest.create({
           data: { userId: user.id, groupId, status: 'PENDING' },
         });
         createdInvites.push(invite);
 
-        // Emit real-time notification to the invited user via Socket.IO
+        // Emit notification via Socket.IO
         req.io.to(`user-${user.id}`).emit('group-invite', {
           message: `You have been invited to join the group "${group.name}".`,
           groupId: group.id,
           requestId: invite.id,
         });
-      } else {
-        console.warn(`No user found with email: ${email}`); // Log a warning for invalid emails
       }
     }
 
-    // Respond with the created invites
     res.json({ message: 'Invites sent successfully.', invites: createdInvites });
   })
 );
+
 router.get(
-  '/groups/search',
+  "/groups/search",
   authenticateToken,
   asyncHandler(async (req, res) => {
     const { query } = req.query;
 
     if (!query) {
-      return res.status(400).json({ error: 'Search query is required' });
+      return res.status(400).json({ error: "Search query is required" });
     }
 
-    const groups = await prisma.group.findMany({
-      where: {
-        name: {
-          contains: query, // Case-insensitive partial match
-          mode: 'insensitive',
+    // Split the query into words for flexible matching
+    const words = query.split(" ").filter((word) => word.trim().length > 0);
+
+    if (words.length === 0) {
+      return res.status(400).json({ error: "Invalid search query." });
+    }
+
+    // Build a logical OR condition to match the first and second words
+    const conditions = words.slice(0, 2).map((word) => ({
+      name: {
+        startsWith: word,
+        mode: "insensitive", // Case-insensitive matching
+      },
+    }));
+
+    try {
+      const groups = await prisma.group.findMany({
+        where: {
+          OR: conditions,
         },
-      },
-      select: {
-        id: true,
-        name: true,
-      },
-    });
-
-    res.json(groups);
-  })
-);
-router.get(
-  '/groups/:id/members',
-  authenticateToken,
-  asyncHandler(async (req, res) => {
-    const groupId = parseInt(req.params.id);
-
-    if (isNaN(groupId)) {
-      return res.status(400).json({ error: 'Invalid group ID' });
-    }
-
-    // Query group and its users
-    const group = await prisma.group.findUnique({
-      where: { id: groupId },
-      include: {
-        users: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
+        select: {
+          id: true,
+          name: true,
+          admins: {
+            select: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                },
+              },
+            },
           },
         },
-      },
-    });
+      });
 
-    if (!group) {
-      return res.status(404).json({ error: 'Group not found' });
+      const formattedGroups = groups.map((group) => ({
+        id: group.id,
+        name: group.name,
+        admins: group.admins.map((admin) => admin.user),
+      }));
+
+      res.json(formattedGroups);
+    } catch (error) {
+      console.error("Error searching groups:", error);
+      res.status(500).json({ error: "An error occurred while searching for groups." });
     }
-
-    res.json(group.users); // Return only the members
   })
 );
 
+router.get(
+  "/groups/:id/search",
+  authenticateToken,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      const group = await prisma.group.findUnique({
+        where: { id: parseInt(id, 10) },
+        include: {
+          admins: {
+            select: {
+              user: {
+                select: { firstName: true, lastName: true, email: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!group) {
+        return res.status(404).json({ error: "Group not found." });
+      }
+
+      const formattedGroup = {
+        id: group.id,
+        name: group.name,
+        admins: group.admins.map((admin) => admin.user),
+      };
+
+      res.json(formattedGroup);
+    } catch (error) {
+      console.error("Error fetching group details:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  })
+);
+
+
+/**
+ * Retrieve users, events, tasks, and expenses with the same group ID
+ */
+router.get(
+  "/groups/:groupId/details",
+  authenticateToken,
+  asyncHandler(async (req, res) => {
+    const groupId = parseInt(req.params.groupId, 10);
+
+    if (isNaN(groupId)) {
+      return res.status(400).json({ error: "Invalid group ID." });
+    }
+
+    try {
+      // Fetch group details including users (excluding the logged-in user), events, tasks, and expenses
+      const group = await prisma.group.findUnique({
+        where: { id: groupId },
+        include: {
+          users: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              avatar: true,
+              location: true,
+              groups: true
+            },
+          },
+          events: {
+            select: {
+              id: true,
+              title: true,
+              date: true,
+              location: true,
+              description: true,
+              tasks: {
+                select: {
+                  id: true,
+                  title: true,
+                  status: true,
+                  createdById: true,
+                  assignedToId: true,
+                },
+              },
+              expenses: {
+                select: {
+                  id: true,
+                  amount: true,
+                  description: true,
+                  paid: true,
+                  paidById: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!group) {
+        return res.status(404).json({ error: "Group not found." });
+      }
+
+      // Exclude the logged-in user from the group users
+      const otherUsers = group.users.filter((user) => user.id !== req.user.id);
+
+      res.status(200).json({
+        groupId: group.id,
+        groupName: group.name,
+        otherUsers, // Filtered users excluding the logged-in user
+        events: group.events, // Events with nested tasks and expenses
+      });
+    } catch (error) {
+      console.error("Error fetching group details:", error);
+      res.status(500).json({ error: "Failed to retrieve group details." });
+    }
+  })
+);
+router.delete(
+  "/groups/:groupId",
+  authenticateToken,
+  async (req, res) => {
+    const { groupId } = req.params;
+    const userId = req.user.id;
+
+    try {
+      const parsedGroupId = parseInt(groupId, 10);
+
+      // Check if the user is an admin of the group
+      const group = await prisma.group.findFirst({
+        where: {
+          id: parsedGroupId,
+          admins: { some: { userId } },
+        },
+      });
+
+      if (!group) {
+        return res.status(403).json({ error: "You are not authorized to delete this group." });
+      }
+
+      // Step 1: Delete related records in the correct order
+      await prisma.comment.deleteMany({
+        where: { eventId: { in: (await prisma.event.findMany({ where: { groupId: parsedGroupId }, select: { id: true } })).map(event => event.id) } }
+      });
+
+      await prisma.task.deleteMany({
+        where: { eventId: { in: (await prisma.event.findMany({ where: { groupId: parsedGroupId }, select: { id: true } })).map(event => event.id) } }
+      });
+
+      await prisma.expense.deleteMany({
+        where: { eventId: { in: (await prisma.event.findMany({ where: { groupId: parsedGroupId }, select: { id: true } })).map(event => event.id) } }
+      });
+
+      await prisma.event.deleteMany({
+        where: { groupId: parsedGroupId },
+      });
+
+      await prisma.message.deleteMany({
+        where: { groupId: parsedGroupId },
+      });
+
+      await prisma.groupRequest.deleteMany({
+        where: { groupId: parsedGroupId },
+      });
+
+      // Step 2: Delete the group itself
+      await prisma.group.delete({
+        where: { id: parsedGroupId },
+      });
+
+      res.json({ message: "Group deleted successfully." });
+    } catch (error) {
+      console.error("Error deleting group:", error);
+      res.status(500).json({ error: "Failed to delete group." });
+    }
+  }
+);
+
+router.put(
+  "/groups/:groupId/leave",
+  authenticateToken,
+  async (req, res) => {
+    const { groupId } = req.params;
+    const userId = req.user.id;
+
+    try {
+      const group = await prisma.group.findUnique({
+        where: { id: parseInt(groupId, 10) },
+        include: { users: true },
+      });
+
+      if (!group) {
+        return res.status(404).json({ error: "Group not found." });
+      }
+
+      // Check if the user is in the group
+      const isMember = group.users.some((user) => user.id === userId);
+      if (!isMember) {
+        return res.status(403).json({ error: "You are not a member of this group." });
+      }
+
+      // Remove the user from the group
+      await prisma.group.update({
+        where: { id: parseInt(groupId, 10) },
+        data: {
+          users: {
+            disconnect: { id: userId },
+          },
+        },
+      });
+
+      res.status(200).json({ message: "You have left the group." });
+    } catch (error) {
+      console.error("Error leaving group:", error);
+      res.status(500).json({ error: "Failed to leave group." });
+    }
+  }
+);
 
 
 

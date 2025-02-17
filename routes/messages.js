@@ -9,39 +9,60 @@ const router = express.Router();
 
 // Send a message
 router.post(
-    '/messages',
-    authenticateToken,
-    asyncHandler(async (req, res) => {
-      const { receiverId, content } = req.body;
-      const senderId = req.user.id;
-  
-      if (!receiverId || !content) {
-        return res.status(400).json({ error: 'Receiver and content are required.' });
-      }
-  
+  "/messages",
+  authenticateToken,
+  asyncHandler(async (req, res) => {
+    const { receiverId, content, groupId } = req.body;
+    const senderId = req.user.id;
+
+    if (!receiverId || !content || !groupId) {
+      return res.status(400).json({ error: "Receiver, content, and groupId are required." });
+    }
+
+    try {
+      // Validate receiver
       const receiver = await prisma.user.findUnique({ where: { id: receiverId } });
       if (!receiver) {
-        return res.status(404).json({ error: 'Receiver not found.' });
+        return res.status(404).json({ error: "Receiver not found." });
       }
-  
+
+      // Validate group
+      const group = await prisma.group.findUnique({ where: { id: groupId } });
+      if (!group) {
+        return res.status(404).json({ error: "Group not found." });
+      }
+
+      // Create the message
       const message = await prisma.message.create({
         data: {
           senderId,
           receiverId,
           content,
+          groupId,
         },
       });
-  
-      // Emit real-time notification
-      req.io.to(`user-${receiverId}`).emit('new-message', {
+
+      console.log("Message successfully created:", message);
+
+      // Emit real-time event
+      console.log("Emitting new message event to:", `user-${receiverId}`);
+      req.io.to(`user-${receiverId}`).emit("new-message", {
+        id: message.id,
         senderId,
         content,
+        groupId,
         createdAt: message.createdAt,
       });
-  
+
       res.status(201).json(message);
-    })
-  );
+    } catch (error) {
+      console.error("Error in sending message:", error);
+      res.status(500).json({ error: "Failed to send message." });
+    }
+  })
+);
+
+
   
 
 // Get inbox messages

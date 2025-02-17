@@ -36,6 +36,7 @@ CREATE TABLE "Admin" (
     CONSTRAINT "Admin_pkey" PRIMARY KEY ("id")
 );
 
+
 -- CreateTable
 CREATE TABLE "Event" (
     "id" SERIAL NOT NULL,

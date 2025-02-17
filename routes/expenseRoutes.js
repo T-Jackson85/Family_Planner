@@ -41,4 +41,22 @@ router.get('/expenses', asyncHandler(async (req, res) => {
     res.status(204).send();
   }));
 
+  router.put('/expenses/:id', asyncHandler(async (req, res) => {
+    const expenseId = parseInt(req.params.id);
+    const { paid } = req.body;
+  
+    try {
+      const updatedExpense = await prisma.expense.update({
+        where: { id: expenseId },
+        data: { paid },
+      });
+  
+      res.json(updatedExpense);
+    } catch (error) {
+      console.error("Error updating expense:", error);
+      res.status(500).json({ error: "Failed to update expense status." });
+    }
+  }));
+  
+
   module.exports = router;

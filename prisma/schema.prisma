@@ -6,33 +6,33 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
-
 model User {
-  id              Int              @id @default(autoincrement())
-  email           String           @unique
-  password        String
-  firstName       String
-  lastName        String
-  phone           String?
-  birthday        DateTime?
-  location        String?
-  avatar          String?          // Profile picture
-  wallpaper       String?          // Profile page wallpaper
-  createdAt       DateTime         @default(now())
+  id               Int              @id @default(autoincrement())
+  email            String           @unique
+  password         String
+  firstName        String
+  lastName         String
+  phone            String?
+  birthday         DateTime?
+  location         String?
+  avatar           String?          // Profile picture
+  wallpaper        String?          // Profile page wallpaper
+  createdAt        DateTime         @default(now())
 
-  groups          Group[]          @relation("UserGroups")
-  comments        Comment[]
-  events          Event[]          @relation("UserEvents")
-  tasksCreated    Task[]           @relation("CreatedTasks")
-  tasksAssigned   Task[]           @relation("AssignedTasks")
-  expenses        Expense[]
-  Admin           Admin[]
-  GroupRequest    GroupRequest[]
-  RefreshToken    RefreshToken[]
+  groups           Group[]          @relation("UserGroups")
+  groupAdmins      Group[]          @relation("GroupAdmins") // Back-reference for Group admins
+  comments         Comment[]
+  events           Event[]          @relation("UserEvents")
+  tasksCreated     Task[]           @relation("CreatedTasks")
+  tasksAssigned    Task[]           @relation("AssignedTasks")
+  expenses         Expense[]
+  Admin            Admin[]
+  GroupRequest     GroupRequest[]
+  RefreshToken     RefreshToken[]
 
   // Message relations
-  sentMessages    Message[]        @relation("SentMessages")
-  receivedMessages Message[]       @relation("ReceivedMessages")
+  sentMessages     Message[]        @relation("SenderRelation")
+  receivedMessages Message[]        @relation("ReceiverRelation")
 }
 
 model Group {
@@ -40,10 +40,12 @@ model Group {
   name      String   @unique
   createdAt DateTime @default(now())
 
-  admins    Admin[]
-  users     User[]         @relation("UserGroups")
+  admins    Admin[]                      // Relation to Admin model
+  groupAdmins User[]    @relation("GroupAdmins") // Relation to User model for group admins
+  users     User[]     @relation("UserGroups")
   events    Event[]
   requests  GroupRequest[]
+  messages  Message[]
 }
 
 model GroupRequest {
@@ -63,7 +65,7 @@ model Admin {
   userId  Int
   groupId Int
   user    User  @relation(fields: [userId], references: [id])
-  group   Group @relation(fields: [groupId], references: [id])
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade) // Fixed relation
 }
 
 model Event {
@@ -132,12 +134,14 @@ model RefreshToken {
 }
 
 model Message {
-  id          Int      @id @default(autoincrement())
-  senderId    Int
-  receiverId  Int
-  content     String
-  createdAt   DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  senderId   Int
+  receiverId Int
+  groupId    Int?
+  content    String
+  createdAt  DateTime @default(now())
 
-  sender      User     @relation("SentMessages", fields: [senderId], references: [id])
-  receiver    User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  sender     User     @relation("SenderRelation", fields: [senderId], references: [id])  // Sender relation
+  receiver   User     @relation("ReceiverRelation", fields: [receiverId], references: [id]) // Receiver relation
+  group      Group?   @relation(fields: [groupId], references: [id]) // Group relation
 }

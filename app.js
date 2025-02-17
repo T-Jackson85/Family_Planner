@@ -26,6 +26,9 @@ const io = new Server(server, {
   },
 });
 
+// Serve static files (for profile pictures)
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
 // Attach Socket.IO to request object
 app.use((req, res, next) => {
   req.io = io;
@@ -108,4 +111,3 @@ server.listen(PORT, () => {
 });
 
 module.exports = app;
-
